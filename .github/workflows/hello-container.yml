@@ -75,6 +75,16 @@ jobs:
         if: always()
         run: docker rm --force "$CONTAINER_NAME" || true
 
+      # TEMPORARY: proves AC-8. Removed before this branch is ready for review.
+      - name: Assert container is gone
+        if: always()
+        run: |
+          if docker inspect --type container "$CONTAINER_NAME" >/dev/null 2>&1; then
+            echo "::error::container ${CONTAINER_NAME} still exists after cleanup"
+            exit 1
+          fi
+          echo "AC-8: docker inspect finds no container named ${CONTAINER_NAME}"
+
       - name: Report container exit code
         env:
           TIMED_OUT: ${{ steps.wait.outputs.timed_out }}
