@@ -1,0 +1,88 @@
+name: hello-container
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hello-container:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      CONTAINER_NAME: hello-${{ github.run_id }}-${{ github.run_attempt }}
+      IMAGE_TAG: hello-container:${{ github.sha }}
+      WAIT_SECONDS: "120"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build --tag "$IMAGE_TAG" .
+
+      - name: Start container
+        run: |
+          echo "container name: $CONTAINER_NAME"
+          docker run --detach --name "$CONTAINER_NAME" "$IMAGE_TAG"
+
+      # Records the container's exit code instead of failing here, so that a
+      # non-zero container is reported by the last step and the logs below are
+      # still printed. Capped so a container that never exits fails with our
+      # message rather than the job's timeout-minutes.
+      - name: Wait for container
+        id: wait
+        run: |
+          set -uo pipefail
+          set +e
+          code=$(timeout "${WAIT_SECONDS}s" docker wait "$CONTAINER_NAME")
+          wait_status=$?
+          set -e
+          if [ "$wait_status" -eq 124 ]; then
+            echo "container did not exit within the ${WAIT_SECONDS}s wait cap; killing it"
+            docker kill "$CONTAINER_NAME" || true
+            {
+              echo "timed_out=true"
+              echo "exit_code=1"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$wait_status" -ne 0 ]; then
+            echo "::error::docker wait failed with status ${wait_status}"
+            exit "$wait_status"
+          fi
+          echo "container exited with code ${code}"
+          {
+            echo "timed_out=false"
+            echo "exit_code=${code}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Print container logs
+        if: always()
+        run: |
+          if ! docker inspect --type container "$CONTAINER_NAME" >/dev/null 2>&1; then
+            echo "no container named ${CONTAINER_NAME}; nothing to log"
+            exit 0
+          fi
+          echo "::group::container logs"
+          logs_status=0
+          docker logs "$CONTAINER_NAME" 2>&1 || logs_status=$?
+          echo "::endgroup::"
+          exit "$logs_status"
+
+      - name: Remove container
+        if: always()
+        run: docker rm --force "$CONTAINER_NAME" || true
+
+      - name: Report container exit code
+        env:
+          TIMED_OUT: ${{ steps.wait.outputs.timed_out }}
+          EXIT_CODE: ${{ steps.wait.outputs.exit_code }}
+        run: |
+          if [ "$TIMED_OUT" = "true" ]; then
+            echo "::error::container did not exit within the ${WAIT_SECONDS}s wait cap and was killed"
+            exit 1
+          fi
+          echo "container exit code: ${EXIT_CODE}"
+          exit "$EXIT_CODE"
