@@ -29,7 +29,9 @@ jobs:
           set +e
           # Hard timeout well above the 25s upper bound, so a container that
           # never stops is killed and fails the job instead of hanging (INV-3).
-          timeout --kill-after=10s 40s docker run --rm "$image" >container.log 2>&1
+          # --init puts an init process at PID 1 so the container actually dies
+          # on the timeout's SIGTERM; PID 1 would otherwise ignore it.
+          timeout --kill-after=10s 40s docker run --init --rm "$image" >container.log 2>&1
           rc=$?
           set -e
           end=$(date +%s)
@@ -48,7 +50,10 @@ jobs:
             failed=1
           fi
 
-          total=$(wc -l <container.log)
+          # Both counts come from grep so they count lines the same way. wc -l
+          # counts newlines, which would disagree with an unterminated last line
+          # and let an eleven-line output pass as ten.
+          total=$(grep -c '' container.log || true)
           matching=$(grep -cx 'hello world' container.log || true)
           if [ "$total" -ne 10 ] || [ "$matching" -ne 10 ]; then
             echo "FAIL: expected exactly 10 lines equal to 'hello world', got ${total} line(s) of which ${matching} matched"
