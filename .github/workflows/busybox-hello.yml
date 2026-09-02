@@ -1,0 +1,67 @@
+name: busybox hello world
+
+# Manual dispatch only, no inputs (AC-1).
+on:
+  workflow_dispatch:
+
+# Nothing is pushed and no secret is read, so read access to the code is all
+# this job needs (INV-1, INV-2).
+permissions:
+  contents: read
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build --tag "busybox-hello:${GITHUB_SHA}" .
+
+      - name: Run the container and check its output and duration
+        run: |
+          set -u
+          image="busybox-hello:${GITHUB_SHA}"
+
+          start=$(date +%s)
+          set +e
+          # Hard timeout well above the 25s upper bound, so a container that
+          # never stops is killed and fails the job instead of hanging (INV-3).
+          timeout --kill-after=10s 40s docker run --rm "$image" >container.log 2>&1
+          rc=$?
+          set -e
+          end=$(date +%s)
+          duration=$((end - start))
+
+          echo "--- container output ---"
+          cat container.log
+          echo "--- end of container output ---"
+          echo "exit status: ${rc}"
+          echo "duration: ${duration}s"
+
+          failed=0
+
+          if [ "$rc" -ne 0 ]; then
+            echo "FAIL: container exited with status ${rc} (124 or 137 means the hard timeout fired)"
+            failed=1
+          fi
+
+          total=$(wc -l <container.log)
+          matching=$(grep -cx 'hello world' container.log || true)
+          if [ "$total" -ne 10 ] || [ "$matching" -ne 10 ]; then
+            echo "FAIL: expected exactly 10 lines equal to 'hello world', got ${total} line(s) of which ${matching} matched"
+            failed=1
+          fi
+
+          if [ "$duration" -lt 10 ] || [ "$duration" -gt 25 ]; then
+            echo "FAIL: duration ${duration}s is outside the accepted 10-25s window"
+            failed=1
+          fi
+
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+
+          echo "PASS: exit 0, 10 lines of 'hello world', ${duration}s"
