@@ -1,0 +1,45 @@
+name: Repo Health Summary
+
+on:
+  workflow_dispatch:
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute and report repo health
+        run: |
+          set +e
+
+          file_count=$(git ls-files | wc -l | tr -d ' ')
+
+          {
+            echo "## Repo Health Summary"
+            echo
+            echo "### Tracked files"
+            echo
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| Total tracked files | $file_count |"
+            echo
+            echo "### 5 largest tracked files"
+            echo
+            echo "| Size | Path |"
+            echo "| --- | --- |"
+            git ls-files | xargs -I{} du -h {} 2>/dev/null | sort -rh | head -5 | awk -F'\t' '{print "| " $1 " | " $2 " |"}'
+            echo
+            echo "### TODO/FIXME count in README.md"
+            echo
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            if [ -f README.md ]; then
+              todo_count=$(grep -c -E 'TODO|FIXME' README.md)
+            else
+              todo_count=0
+            fi
+            echo "| TODO/FIXME occurrences | $todo_count |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit 0
