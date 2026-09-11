@@ -1,5 +1,8 @@
 name: Hello World Container
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -30,17 +33,19 @@ jobs:
       - name: Wait 10 seconds
         if: steps.run.outcome == 'success'
         run: |
-          docker ps --filter "id=${{ steps.run.outputs.container_id }}"
+          id="${{ steps.run.outputs.container_id }}"
+          docker ps --filter "id=$id"
+          running=$(docker inspect -f '{{.State.Running}}' "$id")
+          if [ "$running" != "true" ]; then
+            echo "Container $id is not running, expected it to stay up for the 10s wait" >&2
+            exit 1
+          fi
           sleep 10
           echo "10 seconds elapsed"
 
-      - name: Stop container
+      - name: Stop and remove container
         if: always() && steps.run.outputs.container_id != ''
-        run: docker stop "${{ steps.run.outputs.container_id }}"
-
-      - name: Remove container
-        if: always() && steps.run.outputs.container_id != ''
-        run: docker rm "${{ steps.run.outputs.container_id }}"
+        run: docker rm -f "${{ steps.run.outputs.container_id }}" || true
 
       - name: Remove image
         if: always()
