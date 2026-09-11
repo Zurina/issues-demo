@@ -1,0 +1,52 @@
+name: Hello World Container
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .github/workflows/hello-world-container.yml
+  workflow_dispatch:
+
+jobs:
+  build-run-destroy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        id: build
+        run: docker build -t hello-world:ci .
+
+      - name: Run container
+        id: run
+        if: success()
+        run: |
+          container_id=$(docker run -d hello-world:ci)
+          echo "container_id=$container_id" >> "$GITHUB_OUTPUT"
+          echo "Started container $container_id"
+
+      - name: Wait 10 seconds
+        if: steps.run.outcome == 'success'
+        run: |
+          id="${{ steps.run.outputs.container_id }}"
+          docker ps --filter "id=$id"
+          running=$(docker inspect -f '{{.State.Running}}' "$id")
+          if [ "$running" != "true" ]; then
+            echo "Container $id is not running, expected it to stay up for the 10s wait" >&2
+            exit 1
+          fi
+          sleep 10
+          echo "10 seconds elapsed"
+
+      - name: Stop and remove container
+        if: always() && steps.run.outputs.container_id != ''
+        run: docker rm -f "${{ steps.run.outputs.container_id }}" || true
+
+      - name: Remove image
+        if: always()
+        run: docker rmi hello-world:ci --force || true
